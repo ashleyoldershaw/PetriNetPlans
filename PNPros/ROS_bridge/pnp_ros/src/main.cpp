@@ -26,6 +26,8 @@ using namespace pnpros::LearnPNP;
 using std_msgs::String;
 
 
+string planFolder = "plans/";
+
 
 // Global variables
 string robot_name = "NONAME";
@@ -38,7 +40,8 @@ actionlib::ActionClient<pnp_msgs::PNPAction> *pnpac = NULL;
 void planToExecuteCallback(const std_msgs::String::ConstPtr& msg)
 {
   planToExec = msg->data;
-  ROS_INFO("Plan received from topic %s. Executing plan %s ... ", TOPIC_PLANTOEXEC, planToExec.c_str());
+  ros::param::param<std::string>("~plan_folder",planFolder,string("plans/"));
+  ROS_INFO("Plan received from topic %s. Executing plan %s from folder %s ", TOPIC_PLANTOEXEC, planToExec.c_str(), planFolder.c_str());
   
 }
 
@@ -136,13 +139,13 @@ int main(int argc, char** argv)
     ros::Subscriber planToExecSub = n.subscribe(TOPIC_PLANTOEXEC, 1, planToExecuteCallback);
 	
 	ExternalConditionChecker* conditionChecker;
-    string planName = "stop", currentPlanName="stop", planFolder = "plans/";
+    string planName = "stop", currentPlanName="stop";
 	int episodes, epochs, learningPeriod, samples;
 
 	bool learning = false, logPlaces = false, autorestart = false;
 	bool use_java_connection = false;
 	
-    np.param("current_plan",planName,string("stop"));
+    np.param(PARAM_PNP_CURRENT_PLAN,planName,string("stop"));
 	np.param("plan_folder",planFolder,string("plans/"));
 	np.param("learning",learning,false);
 	np.param("autorestart",autorestart,false);
@@ -340,8 +343,8 @@ int main(int argc, char** argv)
                   executor = new PnpExecuter<PnpPlan>(i);
                 }
                 catch(int e) {
-                cerr << "No plan found!!!" << endl;
-                planToExec="stop"; continue;
+                    cerr << "No plan found!!!" << endl;
+                    planToExec="stop"; continue;
                 }
 
                 if (executor!=NULL) {
@@ -359,6 +362,7 @@ int main(int argc, char** argv)
                         planToExec="stop";
                     }
                     else {
+                        np.setParam(PARAM_PNP_CURRENT_PLAN,planName);
                         cout << "Starting " << executor->getMainPlanName() << endl;
 
                         String activePlaces;

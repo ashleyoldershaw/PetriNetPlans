@@ -8,6 +8,19 @@
 #include <boost/regex.hpp>
 #include <sstream>
 
+// colored prints
+struct TCOL {
+    std::string HEADER = "\033[95m";
+    std::string OKBLUE = "\033[94m";
+    std::string OKGREEN = "\033[92m";
+    std::string WARNING = "\033[93m";
+    std::string FAIL = "\033[91m";
+    std::string ENDC = "\033[0m";
+    std::string BOLD = "\033[1m";
+    std::string UNDERLINE = "\033[4m";
+} tcol;
+
+
 int node_id=0;  // unique id of the nodes
 int arc_id=0;   // unique id of the arcs
 
@@ -503,8 +516,8 @@ void PNPGenerator::save(const char* filename, bool noGraphics) {
     std::ofstream of(ss.str().c_str());
     of << pnp;
     of.close();
-    std::cout << "PNP '" << pnp.getName() << "' saved." << std::endl;
-    std::cout << "PNP stats: '" << pnp.stats() << std::endl;
+    std::cout << tcol.OKGREEN << "PNP '" << pnp.getName() << "' saved." << tcol.ENDC << std::endl;
+    std::cout << tcol.OKGREEN << "PNP stats: '" << pnp.stats() << tcol.ENDC << std::endl;
 }
 
 
@@ -705,7 +718,7 @@ void PNPGenerator::applySocialRules() {
     }
 }
 
-bool PNPGenerator::parseERline(const string line, string &action, string &cond, string &plan)
+bool PNPGenerator::parseERline(const string line, string &action, string &cond, string &plan, double &confidence)
 {
     bool r=false;
     //printf("### Parsing: %s\n",line.c_str());
@@ -720,6 +733,10 @@ bool PNPGenerator::parseERline(const string line, string &action, string &cond, 
         action=strs[2]; boost::algorithm::trim(action);
         cond=strs[1]; boost::algorithm::trim(cond);
         plan=strs[3]; boost::algorithm::trim(plan);
+        confidence = 1.0;
+        if (strs.size()>4) {
+            confidence=atof(strs[4].c_str());
+        }
         r = true;
 
         //printf("### action: [%s] ",action.c_str());
@@ -734,17 +751,18 @@ bool PNPGenerator::parseERline(const string line, string &action, string &cond, 
 void PNPGenerator::readERFile(const char*filename) {
 
     string line,action,cond,recoveryplan;
+    double confidence;
 
     ifstream f(filename);
     while(getline(f,line)) {
-        if (parseERline(line,action,cond,recoveryplan))
-            executionrules.add(action,cond,recoveryplan);
+        if (parseERline(line,action,cond,recoveryplan,confidence))
+            executionrules.add(action,cond,recoveryplan,confidence);
     }
     f.close();
 }
 
 
-void PNPGenerator::applyOneExecutionRule(Place *current_place, string condition, string recoveryplan) {
+void PNPGenerator::applyOneExecutionRule(Place *current_place, string condition, string recoveryplan, double confidence) {
 
     // split recovery plan
     vector<string> v; boost::split(v,recoveryplan,boost::is_any_of("; "),boost::token_compress_on);
@@ -838,11 +856,11 @@ void PNPGenerator::applyExecutionRules() {
         eit = executionrules.v.begin();
         while (eit!=executionrules.v.end()) {
             if (eit->action==current_action) {
-                cout << "    " << eit->condition << " -> " << eit->recoveryplan << endl;
+                cout << "    " << eit->condition << " -> " << eit->recoveryplan << "  - conf: " << eit->confidence << endl;
 
                 boost::trim(eit->recoveryplan);
 
-                applyOneExecutionRule(current_place, eit->condition, eit->recoveryplan);
+                applyOneExecutionRule(current_place, eit->condition, eit->recoveryplan, eit->confidence);
 
             } // if
             eit++;
@@ -1206,7 +1224,7 @@ Place* PNPGenerator::addGotoPattern(Place *pi, string next)
 Place* PNPGenerator::genFromLine_r(Place* pi, string plan)
 {
   
-  cout << endl << "=== Current plan: " << endl << plan << endl;
+  // cout << endl << "=== Current plan: " << endl << plan << endl;
 
   if(plan.empty() || plan == "" || plan == " "){ //base case
     cout << "end" << endl << endl;
@@ -1223,8 +1241,16 @@ Place* PNPGenerator::genFromLine_r(Place* pi, string plan)
     
     //get [ai || <..>]
     string next = getNext(plan);    
-    cout << "current action: " << next << endl;
-    cout << "rest of the plan: " << plan << endl;
+    // cout << "current action: " << next << endl;
+    // cout << "rest of the plan: " << plan << endl;
+
+    // if there are spaces or new lines in the name of an action returns an error and quit the PNP generation
+    // example: if ; is missing between two actions the generation should show an error!!!
+
+    if (next.find(" ")!=string::npos) {
+        cout << tcol.FAIL << "*** ERROR *** Action name " << next << " not valid. Plan not generated!" << tcol.ENDC << endl;
+        exit(-2);
+    }
 
     //conditioning: go deep
     if(next.find('<') != string::npos){
@@ -1299,7 +1325,7 @@ Place* PNPGenerator::genFromLine_r(Place* pi, string plan)
             pi->setName(next);   
             LABELS[next]=pi;  
           }
-          cout << " -- Rest of the plan: " << plan << endl;
+          // cout << " -- Rest of the plan: " << plan << endl;
       }
       else {
           cout << "Linking existing label " << next << endl;
@@ -1311,7 +1337,7 @@ Place* PNPGenerator::genFromLine_r(Place* pi, string plan)
 
       Place *po = addGotoPattern(pi,next);
 
-      cout << " -- current plan: " << plan << endl;
+      // cout << " -- current plan: " << plan << endl;
       string label = next.substr(5);
       cout << " -- current label: " << label << endl;
 
@@ -1337,8 +1363,12 @@ Place* PNPGenerator::genFromLine_r(Place* pi, string plan)
       if (strs.size()>2) {
         cond=strs[1]; boost::algorithm::trim(cond);
         recov=strs[2]; boost::algorithm::trim(recov);
-        cout << "ER::  " << pexec->getName() << " - [" << cond << "] - " << recov << endl;
-        applyOneExecutionRule(lastActionPlace, cond, recov);
+        double confidence = 1.0;
+        if (strs.size()>3) {
+            confidence = atof(strs[3].c_str());
+        }
+        cout << "ER::  " << pexec->getName() << " - [" << cond << "] - " << recov << " conf: " << confidence << endl;
+        applyOneExecutionRule(lastActionPlace, cond, recov, confidence);
       }
       else {
         cout << "\033[22;32;1mWARNING!!! ER " << next << " not well formatted. IGNORED!!! \033[0m" << endl;
